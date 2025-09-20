@@ -4,11 +4,19 @@ from rapidfuzz import process
 from collections import Counter
 import random
 import altair as alt
+import io
+import requests
+
+# ==============================
+# CONFIG
+# ==============================
+DEFAULT_CSV_URL = "https://raw.githubusercontent.com/VWithun/1001_Movies_To_Watch_Moive_Ratings_And_Movie_Picker/main/my_movie_ratings.csv"
+DEFAULT_CSV_PATH = "my_movie_ratings.csv"
 
 # ==============================
 # HEADER
 # ==============================
-st.title("🎬 My Movie Tracker (1001 Movies to Watch Before You Die List)")
+st.title("🎬 My Movie Tracker (1001 Movies to Watch Before You Die)")
 
 st.markdown("""
 Welcome to **My Movie Tracker**!  
@@ -16,43 +24,42 @@ Welcome to **My Movie Tracker**!
 This app is based on **IMDb's list '1001 Movies to Watch Before You Die'**:  
 [IMDb Reference](https://www.imdb.com/list/ls024863935/)
 
-This app allows you to:
-- Track which movies you have watched  
-- Rate movies you've seen  
-- Discover new movies using a random picker  
-- Explore your favorite genres and directors  
-
-**How to use:**
-1. Download the default CSV to get started. 
-2. Update your watched movies and ratings directly in the app.  
-3. Use the Random Movie Picker to get suggestions for what to watch next.  
-4. Check your personal stats and favorite genres once you have rated enough movies.
+### How to Use:
+1. **Download the default CSV** to get started using the button below.  
+2. **Upload your saved CSV** at the start of each session to continue where you left off.  
+3. Search for movies, update your ratings, and mark them as watched.  
+4. When finished, **download the updated CSV** and save it on your computer.  
+5. Next time you return, upload your saved CSV to pick up where you left off.  
 """)
 
-# ==============================
-# CONFIG
-# ==============================
-DEFAULT_CSV_PATH = "my_movie_ratings.csv"
+# Download default CSV
+st.download_button(
+    label="⬇️ Download Starter CSV",
+    data=requests.get(DEFAULT_CSV_URL).content,
+    file_name="my_movie_ratings.csv",
+    mime="text/csv"
+)
+
+st.markdown("---")
 
 # ==============================
 # LOAD DATA
 # ==============================
-def load_data(path):
-    df = pd.read_csv(path)
+def load_data(path_or_buffer):
+    df = pd.read_csv(path_or_buffer)
     df.columns = [col.strip() for col in df.columns]
     return df
 
-st.markdown(
-    f"Download the CSV my_movie_ratings.csv from GitHub [csv]({DEFAULT_CSV_PATH}) to get started."
-)
+uploaded_file = st.file_uploader("📂 Upload your CSV file:", type=["csv"], key="csv_upload")
 
-uploaded_file = st.file_uploader("📂 Upload CSV file:", type=["csv"], key="csv_upload")
 if uploaded_file:
     CSV_PATH = uploaded_file.name
     df = load_data(uploaded_file)
 else:
+    # If no file uploaded, use default GitHub file
+    response = requests.get(DEFAULT_CSV_URL)
     CSV_PATH = DEFAULT_CSV_PATH
-    df = load_data(DEFAULT_CSV_PATH)
+    df = load_data(io.StringIO(response.text))
 
 if "df" not in st.session_state or st.session_state.get("csv_path") != CSV_PATH:
     st.session_state.df = df
@@ -109,17 +116,13 @@ with col_left:
     st.subheader("🔍 Search & Filter Movies")
 
     st.markdown(
-        "<span style='color:#ff6961;'>⚠️ Warning: Do not rename the CSV file or change column names or add columns, as it may cause errors.</span>",
+        "<span style='color:#ff6961;'>⚠️ Do not rename the CSV file or modify columns as it may cause errors.</span>",
         unsafe_allow_html=True
     )
 
     # ---------- TITLE SEARCH (Top Match Only) ----------
     all_titles = df["Title"].dropna().astype(str).tolist()
-    search_query = st.text_input(
-        "Search by Title", 
-        placeholder="e.g., Braveheart", 
-        key="search_title_input"
-    )
+    search_query = st.text_input("Search by Title", placeholder="e.g., Braveheart", key="search_title_input")
     matched_titles = get_fuzzy_matches(search_query, all_titles) if search_query else []
 
     # ---------- OTHER FILTERS ----------
@@ -152,7 +155,6 @@ if selected_decade != "All":
 with col_right:
     st.subheader("🎥 Search Results")
 
-    # Only show this column if there's a title search or any other filters applied
     show_results = bool(search_query) or selected_director != "All" or selected_actor != "All" or selected_genres or selected_decade != "All"
 
     if show_results:
@@ -186,14 +188,12 @@ with col_right:
                     df.loc[df["Title"] == movie_row['Title'], "Rating"] = rating_val
                     df.loc[df["Title"] == movie_row['Title'], "Watched"] = True
                 if st.button(f"💾 Save {movie_row['Title']}", key=f"save_{movie_row['Title']}"):
-                    df.to_csv(CSV_PATH, index=False)
                     st.session_state.df = df
                     st.success(f"Saved '{movie_row['Title']}' successfully!")
                 st.markdown("</div>", unsafe_allow_html=True)
             else:
                 st.write("No movies match your title search.")
         else:
-            # Show filtered results (other filters) as list only
             if filtered_df.empty:
                 st.write("No movies match your filter.")
             else:
@@ -201,9 +201,6 @@ with col_right:
                     st.markdown(f"- **{row['Title']} ({row['Year']})** | 🎥 {row['Director']} | 🎭 {row['Genres']}")
     else:
         st.write("Enter a title or apply filters to see search results.")
-
-
-
 
 # ==============================
 # RANDOM MOVIE PICKER (UNWATCHED ONLY)
@@ -290,25 +287,18 @@ if rated_df.shape[0] > 5:
         st.subheader("🎭 Favorite Genres (Watched)")
         st.altair_chart(genre_chart + text, use_container_width=True)
 
-    # Top Directors
-    top_directors = rated_df['Director'].value_counts().head(5)
-    if not top_directors.empty:
-        st.subheader("🎬 Top Directors")
-        st.bar_chart(top_directors)
+# ==============================
+# DOWNLOAD UPDATED CSV
+# ==============================
+st.markdown("---")
+st.subheader("💾 Save Your Progress")
 
-    # Completion Stats
-    total_movies = df.shape[0]
-    watched_count = df[df["Watched"] == True].shape[0]
-    unwatched_count = total_movies - watched_count
-    st.subheader("📽️ Movies Watched vs Unwatched")
-    st.write(f"**Watched:** {watched_count} | **Unwatched:** {unwatched_count}")
-    st.progress(min(watched_count/total_movies,1.0))
-# ==============================
-# SHOW/HIDE FULL MOVIE LIST BUTTON
-# ==============================
-with st.expander("📜 See All Movies"):
-    for _, row in df.iterrows():
-        st.markdown(f"- **{row['Title']} ({row['Year']})** | 🎥 {row['Director']} | 🎭 {row['Genres']}")
+st.download_button(
+    label="⬇️ Download Updated CSV",
+    data=st.session_state.df.to_csv(index=False),
+    file_name="my_movie_ratings.csv",
+    mime="text/csv",
+)
 
 # ==============================
 # FOOTER
