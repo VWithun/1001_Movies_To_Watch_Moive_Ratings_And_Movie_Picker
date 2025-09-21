@@ -28,10 +28,10 @@ This app is based on **IMDb's list '1001 Movies to Watch Before You Die'**:
 [IMDb Reference](https://www.imdb.com/list/ls024863935/)
 
 ### How to Use on Mobile:
-1. **Download the starter CSV** to your device. On mobile, it usually saves to your **Downloads** folder.  
-2. **Upload your CSV** when you return. Your phone will let you pick the file from Downloads or cloud storage.  
+1. **Download the starter CSV** to your device (usually in **Downloads**).  
+2. **Upload your CSV** to continue.  
 3. Update ratings, mark movies as watched.  
-4. **Download your updated CSV** again — the file name is simple and easy to find.  
+4. **Download your updated CSV** again.  
 5. Re-upload the updated CSV next time to continue.
 """)
 
@@ -60,11 +60,7 @@ def load_data(path_or_buffer):
                 df[col] = "N/A"
     return df
 
-uploaded_file = st.file_uploader(
-    "📂 Upload your CSV file (from Downloads or cloud storage):",
-    type=["csv"],
-    label_visibility="visible"
-)
+uploaded_file = st.file_uploader("📂 Upload your CSV file:", type=["csv"])
 
 if uploaded_file:
     df = load_data(uploaded_file)
@@ -78,8 +74,45 @@ df = st.session_state.df
 df['Genres_list'] = df['Genres'].fillna('').apply(lambda x: x.split(', ') if isinstance(x, str) else [])
 
 # ==============================
+# SEARCH & FILTER
+# ==============================
+st.markdown("---")
+st.subheader("🔍 Search & Filter Movies")
+
+search_title = st.text_input("Search by Title")
+
+all_actors = sorted(set([actor for sublist in df['Actors'].dropna().str.split(', ') for actor in sublist]))
+selected_actor = st.selectbox("Filter by Actor", ["All"] + all_actors)
+
+all_directors = sorted(df['Director'].dropna().unique())
+selected_director = st.selectbox("Filter by Director", ["All"] + list(all_directors))
+
+all_genres = sorted(set([genre for sublist in df['Genres_list'] for genre in sublist]))
+selected_genre = st.selectbox("Filter by Genre", ["All"] + all_genres)
+
+watched_filter = st.selectbox("Filter by Watched Status", ["All", "Watched", "Not Watched"])
+
+filtered_df = df.copy()
+if search_title:
+    filtered_df = filtered_df[filtered_df['Title'].str.contains(search_title, case=False, na=False)]
+if selected_actor != "All":
+    filtered_df = filtered_df[filtered_df['Actors'].str.contains(selected_actor, na=False)]
+if selected_director != "All":
+    filtered_df = filtered_df[filtered_df['Director'] == selected_director]
+if selected_genre != "All":
+    filtered_df = filtered_df[filtered_df['Genres_list'].apply(lambda x: selected_genre in x)]
+if watched_filter == "Watched":
+    filtered_df = filtered_df[filtered_df['Watched'] == True]
+elif watched_filter == "Not Watched":
+    filtered_df = filtered_df[filtered_df['Watched'] == False]
+
+st.write(f"Showing {len(filtered_df)} movies matching your search/filter criteria")
+st.dataframe(filtered_df[['Title','Year','Genres','Actors','Director','Rating','Watched']])
+
+# ==============================
 # USER STATISTICS (Watched Movies Only)
 # ==============================
+st.markdown("---")
 st.subheader("📊 Your Movie Stats")
 watched_df = df[df["Watched"] == True].copy()
 watched_df['Rating'] = pd.to_numeric(watched_df['Rating'], errors='coerce')
@@ -87,11 +120,9 @@ watched_df['Rating'] = pd.to_numeric(watched_df['Rating'], errors='coerce')
 if watched_df.empty:
     st.write("No watched movies yet. Mark movies as watched to see your statistics!")
 else:
-    # Highest Rated Movie
     highest_movie = watched_df.sort_values(by='Rating', ascending=False).iloc[0]
     st.markdown(f"### ⭐ Highest Rated Movie: **{highest_movie['Title']}** ({highest_movie['Rating']}/10)")
 
-    # Top 10 Rated Movies
     top10_df = watched_df.sort_values(by='Rating', ascending=False).head(10)
     st.markdown("### 🎞 Top 10 Rated Movies")
     chart_top10 = alt.Chart(top10_df).mark_bar(color="#61dafb").encode(
@@ -101,7 +132,6 @@ else:
     ).properties(height=300)
     st.altair_chart(chart_top10, use_container_width=True)
 
-    # Top Directors (≥2 movies)
     director_counts = watched_df['Director'].value_counts()
     top_directors = director_counts[director_counts >= 2]
     if not top_directors.empty:
@@ -110,7 +140,6 @@ else:
             movies_by_director = watched_df[watched_df['Director']==director]['Title'].tolist()
             st.markdown(f"- **{director}** ({count} movies): {', '.join(movies_by_director)}")
 
-    # Top Actors (≥2 movies)
     actor_list = watched_df['Actors'].dropna().str.split(', ').sum()
     actor_counts = Counter(actor_list)
     top_actors = {actor: cnt for actor, cnt in actor_counts.items() if cnt >= 2}
@@ -120,7 +149,6 @@ else:
             movies_by_actor = watched_df[watched_df['Actors'].str.contains(actor)]['Title'].tolist()
             st.markdown(f"- **{actor}** ({count} movies): {', '.join(movies_by_actor)}")
 
-    # Most Common Genres
     genres_all = watched_df['Genres'].dropna().str.split(', ').sum()
     if genres_all:
         genre_counts = Counter(genres_all)
@@ -140,7 +168,6 @@ else:
 st.markdown("---")
 st.subheader("🎬 Watched Movies")
 show_watched = st.checkbox("Show Watched Movies", value=False)
-
 if show_watched:
     if watched_df.empty:
         st.write("No movies marked as watched yet.")
@@ -155,11 +182,12 @@ st.markdown("---")
 st.subheader("💾 Save Your Progress (Mobile-Friendly)")
 st.markdown("Tip: On mobile, the file will usually appear in your **Downloads** folder.")
 
+unique_filename = "my_movie_ratings_copy.csv"
 csv_bytes = st.session_state.df.to_csv(index=False).encode('utf-8')
 st.download_button(
     label="⬇️ Download Updated CSV",
     data=csv_bytes,
-    file_name="my_movie_ratings_copy.csv",
+    file_name=unique_filename,
     mime="text/csv",
 )
 
