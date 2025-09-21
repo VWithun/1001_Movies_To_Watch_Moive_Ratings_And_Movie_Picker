@@ -1,8 +1,6 @@
 import pandas as pd
 import streamlit as st
-from rapidfuzz import process
 from collections import Counter
-import random
 import altair as alt
 import io
 import requests
@@ -11,12 +9,17 @@ import requests
 # CONFIG
 # ==============================
 DEFAULT_CSV_URL = "https://raw.githubusercontent.com/VWithun/1001_Movies_To_Watch_Moive_Ratings_And_Movie_Picker/main/my_movie_ratings.csv"
-DEFAULT_CSV_PATH = "my_movie_ratings.csv"
+GIF_URL = "https://media3.giphy.com/media/v1.Y2lkPTc5MGI3NjExaDRnd2M4NnRtYTAwM3VxMnBrNHNmYXRoc2E5amw0cDNwNGlnOTVtMSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/ToMjGpp7glCbyd7Id1u/giphy.gif"
 
 # ==============================
 # HEADER
 # ==============================
-st.title("🎬 My Movie Tracker (1001 Movies to Watch Before You Die)")
+st.markdown(f"""
+<div style="display:flex; align-items:center; flex-wrap: wrap;">
+    <img src="{GIF_URL}" width="150" style="margin-right:20px; border-radius:12px;">
+    <h1 style="font-size:2em; margin-top:20px;">🎬 My Movie Tracker (1001 Movies to Watch Before You Die)</h1>
+</div>
+""", unsafe_allow_html=True)
 
 st.markdown("""
 Welcome to **My Movie Tracker**!  
@@ -24,22 +27,20 @@ Welcome to **My Movie Tracker**!
 This app is based on **IMDb's list '1001 Movies to Watch Before You Die'**:  
 [IMDb Reference](https://www.imdb.com/list/ls024863935/)
 
-### How to Use:
-1. **Download the default CSV** to get started using the button below.  
-2. **Upload your saved CSV** at the start of each session to continue where you left off.  
-3. Search for movies, update your ratings, and mark them as watched.  
-4. When finished, **download the updated CSV** and save it on your computer.  
-5. Next time you return, upload your saved CSV to pick up where you left off.  
+### How to Use on Mobile:
+1. **Download the starter CSV** to your device. On mobile, it usually saves to your **Downloads** folder.  
+2. **Upload your CSV** when you return. Your phone will let you pick the file from Downloads or cloud storage.  
+3. Update ratings, mark movies as watched.  
+4. **Download your updated CSV** again — the file name is simple and easy to find.  
+5. Re-upload the updated CSV next time to continue.
 """)
 
-# Download default CSV
 st.download_button(
     label="⬇️ Download Starter CSV",
     data=requests.get(DEFAULT_CSV_URL).content,
     file_name="my_movie_ratings.csv",
-    mime="text/csv"
+    mime="text/csv",
 )
-
 st.markdown("---")
 
 # ==============================
@@ -48,257 +49,131 @@ st.markdown("---")
 def load_data(path_or_buffer):
     df = pd.read_csv(path_or_buffer)
     df.columns = [col.strip() for col in df.columns]
+    required_columns = ["Title", "Year", "Genres", "Actors", "Director", "Plot", "Poster_URL", "Rating", "Watched"]
+    for col in required_columns:
+        if col not in df.columns:
+            if col == "Rating":
+                df[col] = None
+            elif col == "Watched":
+                df[col] = False
+            else:
+                df[col] = "N/A"
     return df
 
-uploaded_file = st.file_uploader("📂 Upload your CSV file:", type=["csv"], key="csv_upload")
+uploaded_file = st.file_uploader(
+    "📂 Upload your CSV file (from Downloads or cloud storage):",
+    type=["csv"],
+    label_visibility="visible"
+)
 
 if uploaded_file:
-    CSV_PATH = uploaded_file.name
     df = load_data(uploaded_file)
-else:
-    # If no file uploaded, use default GitHub file
-    response = requests.get(DEFAULT_CSV_URL)
-    CSV_PATH = DEFAULT_CSV_PATH
-    df = load_data(io.StringIO(response.text))
-
-if "df" not in st.session_state or st.session_state.get("csv_path") != CSV_PATH:
     st.session_state.df = df
-    st.session_state.csv_path = CSV_PATH
+else:
+    response = requests.get(DEFAULT_CSV_URL)
+    df = load_data(io.StringIO(response.text))
+    st.session_state.df = df
 
 df = st.session_state.df
-
-# Ensure required columns exist
-required_columns = ["Title", "Year", "Genres", "Actors", "Director", "Plot", "Poster_URL", "Rating", "Watched"]
-for col in required_columns:
-    if col not in df.columns:
-        if col == "Rating":
-            df[col] = None
-        elif col == "Watched":
-            df[col] = False
-        else:
-            df[col] = "N/A"
-
-# Prepare Genres list safely
 df['Genres_list'] = df['Genres'].fillna('').apply(lambda x: x.split(', ') if isinstance(x, str) else [])
 
 # ==============================
-# HELPER FUNCTIONS
+# USER STATISTICS (Watched Movies Only)
 # ==============================
-def get_fuzzy_matches(query, choices, limit=8, score_cutoff=60):
-    if not query:
-        return []
-    results = process.extract(query, choices, limit=limit, score_cutoff=score_cutoff)
-    return [r[0] for r in results]
+st.subheader("📊 Your Movie Stats")
+watched_df = df[df["Watched"] == True].copy()
+watched_df['Rating'] = pd.to_numeric(watched_df['Rating'], errors='coerce')
 
-# ==============================
-# STYLES
-# ==============================
-st.markdown("""
-<style>
-body { background-color: #121212; color: #e0e0e0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
-.stApp { background-color: #121212; }
-.movie-card { background-color: #1e1e1e; border-radius: 12px; padding: 10px; margin-bottom: 12px; display: flex; flex-direction: row; box-shadow: 0px 4px 12px rgba(0,0,0,0.4); }
-.movie-details { flex: 1; margin-left: 10px; }
-.movie-title { font-size: 1em; font-weight: bold; }
-.small-meta { font-size: 0.8em; color: #bdbdbd; margin: 2px 0; }
-.movie-plot { font-size: 0.85em; font-style: italic; margin: 4px 0; }
-a { color: #61dafb; text-decoration: none; }
-footer { text-align: center; margin-top: 20px; font-size: 0.8em; color: #888; }
-</style>
-""", unsafe_allow_html=True)
+if watched_df.empty:
+    st.write("No watched movies yet. Mark movies as watched to see your statistics!")
+else:
+    # Highest Rated Movie
+    highest_movie = watched_df.sort_values(by='Rating', ascending=False).iloc[0]
+    st.markdown(f"### ⭐ Highest Rated Movie: **{highest_movie['Title']}** ({highest_movie['Rating']}/10)")
 
-# ==============================
-# SEARCH & FILTER MOVIES
-# ==============================
-col_left, col_right = st.columns([1, 1.6])
+    # Top 10 Rated Movies
+    top10_df = watched_df.sort_values(by='Rating', ascending=False).head(10)
+    st.markdown("### 🎞 Top 10 Rated Movies")
+    chart_top10 = alt.Chart(top10_df).mark_bar(color="#61dafb").encode(
+        x=alt.X('Rating:Q', title='Rating', scale=alt.Scale(domain=[0,10])),
+        y=alt.Y('Title:N', sort='-x', title='Movie'),
+        tooltip=['Title','Rating']
+    ).properties(height=300)
+    st.altair_chart(chart_top10, use_container_width=True)
 
-with col_left:
-    st.subheader("🔍 Search & Filter Movies")
+    # Top Directors (≥2 movies)
+    director_counts = watched_df['Director'].value_counts()
+    top_directors = director_counts[director_counts >= 2]
+    if not top_directors.empty:
+        st.markdown("### 🎬 Top Directors (≥2 watched movies)")
+        for director, count in top_directors.items():
+            movies_by_director = watched_df[watched_df['Director']==director]['Title'].tolist()
+            st.markdown(f"- **{director}** ({count} movies): {', '.join(movies_by_director)}")
 
-    st.markdown(
-        "<span style='color:#ff6961;'>⚠️ Do not rename the CSV file or modify columns as it may cause errors.</span>",
-        unsafe_allow_html=True
-    )
+    # Top Actors (≥2 movies)
+    actor_list = watched_df['Actors'].dropna().str.split(', ').sum()
+    actor_counts = Counter(actor_list)
+    top_actors = {actor: cnt for actor, cnt in actor_counts.items() if cnt >= 2}
+    if top_actors:
+        st.markdown("### 👤 Top Actors (≥2 watched movies)")
+        for actor, count in top_actors.items():
+            movies_by_actor = watched_df[watched_df['Actors'].str.contains(actor)]['Title'].tolist()
+            st.markdown(f"- **{actor}** ({count} movies): {', '.join(movies_by_actor)}")
 
-    # ---------- TITLE SEARCH (Top Match Only) ----------
-    all_titles = df["Title"].dropna().astype(str).tolist()
-    search_query = st.text_input("Search by Title", placeholder="e.g., Braveheart", key="search_title_input")
-    matched_titles = get_fuzzy_matches(search_query, all_titles) if search_query else []
-
-    # ---------- OTHER FILTERS ----------
-    all_directors = sorted(df["Director"].dropna().unique())
-    selected_director = st.selectbox("Search Director", ["All"] + all_directors, key="director_filter")
-
-    all_actors = sorted(set(a for sublist in df['Actors'].dropna().str.split(', ') for a in sublist))
-    selected_actor = st.selectbox("Search Actor", ["All"] + all_actors, key="actor_filter")
-
-    all_genres = sorted(set(g for lst in df['Genres_list'] for g in lst))
-    selected_genres = st.multiselect("Select Genre(s)", all_genres, key="genre_filter")
-
-    decades = sorted(df["Year"].dropna().apply(lambda y: (y//10)*10).unique())
-    selected_decade = st.selectbox("Select Decade", ["All"] + [str(d) for d in decades], key="decade_filter")
-
-# Apply filters (other than title)
-filtered_df = df.copy()
-if selected_director != "All":
-    filtered_df = filtered_df[filtered_df["Director"] == selected_director]
-if selected_actor != "All":
-    filtered_df = filtered_df[filtered_df['Actors'].str.contains(selected_actor, case=False, na=False)]
-if selected_genres:
-    filtered_df = filtered_df[filtered_df['Genres_list'].apply(lambda g: any(genre in g for genre in selected_genres))]
-if selected_decade != "All":
-    filtered_df = filtered_df[filtered_df["Year"].apply(lambda y: (y//10)*10) == int(selected_decade)]
+    # Most Common Genres
+    genres_all = watched_df['Genres'].dropna().str.split(', ').sum()
+    if genres_all:
+        genre_counts = Counter(genres_all)
+        most_common_genre, genre_count = genre_counts.most_common(1)[0]
+        st.markdown(f"### 🎭 Most Common Genre: **{most_common_genre}** ({genre_count} movies)")
+        genre_df = pd.DataFrame(genre_counts.items(), columns=['Genre','Count'])
+        chart_genres = alt.Chart(genre_df).mark_bar(color="#ff6961").encode(
+            x=alt.X('Count:Q', title='Count'),
+            y=alt.Y('Genre:N', sort='-x', title='Genre'),
+            tooltip=['Genre','Count']
+        ).properties(height=300)
+        st.altair_chart(chart_genres, use_container_width=True)
 
 # ==============================
-# SEARCH RESULTS DISPLAY
+# WATCHED MOVIES LIST (Toggleable)
 # ==============================
-with col_right:
-    st.subheader("🎥 Search Results")
+st.markdown("---")
+st.subheader("🎬 Watched Movies")
+show_watched = st.checkbox("Show Watched Movies", value=False)
 
-    show_results = bool(search_query) or selected_director != "All" or selected_actor != "All" or selected_genres or selected_decade != "All"
-
-    if show_results:
-        if search_query:
-            if matched_titles:
-                # Display only the top match
-                best_title = matched_titles[0]
-                movie_row = df[df["Title"] == best_title].iloc[0]
-
-                st.markdown("<div class='movie-card'>", unsafe_allow_html=True)
-                poster_url = movie_row.get("Poster_URL", "")
-                if pd.notna(poster_url) and poster_url.strip():
-                    st.image(poster_url, width=120)
-                actors_html = ", ".join([a.strip() for a in str(movie_row["Actors"]).split(",")]) if pd.notna(movie_row["Actors"]) else "N/A"
-                rating_display = movie_row['Rating'] if pd.notna(movie_row['Rating']) else "None"
-                watched_status = "Watched" if movie_row["Watched"] else "Not Watched"
-                st.markdown(
-                    f"<div class='movie-details'>"
-                    f"<div class='movie-title'>{movie_row['Title']} ({movie_row['Year']})</div>"
-                    f"<div class='small-meta'>🎭 {movie_row['Genres']}</div>"
-                    f"<div class='small-meta'>🎥 {movie_row['Director']}</div>"
-                    f"<div class='small-meta'>👤 {actors_html}</div>"
-                    f"<div class='movie-plot'>{movie_row['Plot']}</div>"
-                    f"<div class='small-meta'>My Rating: {rating_display}</div>"
-                    f"<div class='small-meta'>{watched_status}</div>"
-                    f"</div>", unsafe_allow_html=True
-                )
-                rating_options = [None] + [x/2 for x in range(1, 21)]
-                rating_val = st.selectbox(f"Update Rating for {movie_row['Title']}", rating_options, index=0, key=f"Rating_{movie_row['Title']}")
-                if rating_val is not None:
-                    df.loc[df["Title"] == movie_row['Title'], "Rating"] = rating_val
-                    df.loc[df["Title"] == movie_row['Title'], "Watched"] = True
-                if st.button(f"💾 Save {movie_row['Title']}", key=f"save_{movie_row['Title']}"):
-                    st.session_state.df = df
-                    st.success(f"Saved '{movie_row['Title']}' successfully!")
-                st.markdown("</div>", unsafe_allow_html=True)
-            else:
-                st.write("No movies match your title search.")
-        else:
-            if filtered_df.empty:
-                st.write("No movies match your filter.")
-            else:
-                for _, row in filtered_df.iterrows():
-                    st.markdown(f"- **{row['Title']} ({row['Year']})** | 🎥 {row['Director']} | 🎭 {row['Genres']}")
-    else:
-        st.write("Enter a title or apply filters to see search results.")
-
-# ==============================
-# RANDOM MOVIE PICKER (UNWATCHED ONLY)
-# ==============================
-st.markdown("<h3 style='color:#e0e0e0;'>🎲 Can't decide what to watch?</h3>", unsafe_allow_html=True)
-
-if st.button("Pick a Random Movie"):
-    random_picker_df = df[df["Watched"] == False].copy()
-    
-    if random_picker_df.empty:
-        st.write("🎬 You have watched all movies! Nothing left to pick.")
-    else:
-        movie = random_picker_df.sample(1).iloc[0]
-        st.markdown(f"### {movie['Title']} ({movie['Year']})")
-        st.write(f"Genres: {movie['Genres']}")
-        st.write(f"Director: {movie['Director']}")
-        st.write(f"Actors: {movie['Actors']}")
-        if 'Plot' in movie and movie['Plot']:
-            st.write(f"**Plot:** {movie['Plot']}")
-        if 'Poster_URL' in movie and movie['Poster_URL'] and movie['Poster_URL'] != "N/A":
-            st.image(movie['Poster_URL'], width=250)
-
-# ==============================
-# WATCHED MOVIES LIST
-# ==============================
-with st.expander("🎬 Watched Movies"):
-    watched_df = df[df["Watched"] == True].copy()
-    if not watched_df.empty:
-        watched_df['Rating'] = watched_df['Rating'].fillna("None")
-        for _, row in watched_df.sort_values(by='Rating', ascending=False).iterrows():
-            st.markdown(f"- **{row['Title']}** - Rating: {row['Rating']}")
-    else:
+if show_watched:
+    if watched_df.empty:
         st.write("No movies marked as watched yet.")
-
-# ==============================
-# USER STATISTICS
-# ==============================
-rated_df = df[df['Rating'].notna() & (df['Rating'] != "None")].copy()
-if rated_df.shape[0] > 5:
-    st.subheader("📊 Your Movie Stats")
-
-    # Average Rating
-    watched_ratings = rated_df['Rating'].astype(float)
-    avg_rating = watched_ratings.mean()
-    st.markdown(f"**Average Rating:** {avg_rating:.2f}/10")
-
-    # Rating distribution
-    rating_counts = watched_ratings.value_counts().sort_index()
-    rating_chart = (
-        alt.Chart(pd.DataFrame({'Rating': rating_counts.index, 'Count': rating_counts.values}))
-        .mark_bar(color='#ff7f0e')
-        .encode(
-            x=alt.X('Rating:O', title='Rating'),
-            y=alt.Y('Count:Q', title='Number of Movies'),
-        )
-    )
-    text = rating_chart.mark_text(
-        align='center',
-        baseline='bottom',
-        dy=-2,
-        color='white'
-    ).encode(text='Count:Q')
-    st.altair_chart(rating_chart + text, use_container_width=True)
-
-    # Favorite Genres
-    genre_list = rated_df['Genres'].dropna().str.split(', ').sum()
-    if genre_list:
-        genre_counts = Counter(genre_list)
-        genre_df = pd.DataFrame({'Genre': list(genre_counts.keys()), 'Count': list(genre_counts.values())})
-        genre_chart = (
-            alt.Chart(genre_df)
-            .mark_bar(color='#17becf')
-            .encode(
-                x=alt.X('Count:Q', title='Count'),
-                y=alt.Y('Genre:N', sort='-x', title='Genre'),
-            )
-        )
-        text = genre_chart.mark_text(
-            align='left',
-            baseline='middle',
-            dx=3,
-            color='white'
-        ).encode(text='Count:Q')
-        st.subheader("🎭 Favorite Genres (Watched)")
-        st.altair_chart(genre_chart + text, use_container_width=True)
+    else:
+        for _, row in watched_df.sort_values(by='Rating', ascending=False).iterrows():
+            st.markdown(f"- **{row['Title']}** – Rating: {row['Rating']}")
 
 # ==============================
 # DOWNLOAD UPDATED CSV
 # ==============================
 st.markdown("---")
-st.subheader("💾 Save Your Progress")
+st.subheader("💾 Save Your Progress (Mobile-Friendly)")
+st.markdown("Tip: On mobile, the file will usually appear in your **Downloads** folder.")
 
+csv_bytes = st.session_state.df.to_csv(index=False).encode('utf-8')
 st.download_button(
     label="⬇️ Download Updated CSV",
-    data=st.session_state.df.to_csv(index=False),
-    file_name="my_movie_ratings.csv",
+    data=csv_bytes,
+    file_name="my_movie_ratings_copy.csv",
     mime="text/csv",
 )
+
+# ==============================
+# MOBILE-FRIENDLY STYLING
+# ==============================
+st.markdown("""
+<style>
+body { font-size:16px; line-height:1.5em; }
+h1, h2, h3, h4 { line-height:1.3em; }
+.stButton>button { font-size:1em; padding:10px 20px; }
+.stFileUploader>div { font-size:1em; padding:10px; }
+</style>
+""", unsafe_allow_html=True)
 
 # ==============================
 # FOOTER
