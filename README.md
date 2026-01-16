@@ -1,6 +1,7 @@
 # 🎬 My Movie Tracker - Streamlit App
 
 Welcome to **My Movie Tracker**! This interactive app lets you explore, track, and rate your favorite movies. You can upload your own CSV file of movies, mark them as watched, and add personal ratings.
+https://1001ratingandmoviespicker.streamlit.app/
 
 ---
 
@@ -83,4 +84,5 @@ streamlit run movie_app.py
 
 
 Copyright (c) 2025 VWithun
+
 
